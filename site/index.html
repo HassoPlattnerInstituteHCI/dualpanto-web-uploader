@@ -375,10 +375,14 @@ function updateBranchMeta() {
   const b = selectedBranch();
   if (!b) { $("branchMeta").textContent = ""; return; }
   const repo = manifest.firmwareRepo || "HassoPlattnerInstituteHCI/dualpantoframework";
+  const cfg = b.config
+    ? `<span class="pill" title="Hardware config used for this build">${
+        b.config.startsWith("generated:") ? "hw: " + b.config.slice(10) : "hw: branch default"}</span>`
+    : "";
   $("branchMeta").innerHTML =
     `Commit <a href="https://github.com/${repo}/commit/${b.commit}" target="_blank" rel="noopener">${b.commitShort}</a>` +
     `<span class="pill">built ${new Date(b.builtAt).toLocaleString()}</span>` +
-    `<span class="pill">${b.chip}</span>`;
+    `<span class="pill">${b.chip}</span>` + cfg;
 }
 
 /* ---------------------------------------------------------------- *

@@ -102,6 +102,18 @@ in the UI, and the nightly schedule keeps it fresh).
 - **Flash offsets:** the standard arduino-esp32 1.x layout (bootloader `0x1000`,
   partition table `0x8000`, `boot_app0` `0xE000`, app `0x10000`) is written into each
   branch's `info.json` by CI, so the web page stays layout-agnostic.
+- **Hardware config:** some branches (e.g. `BIS`) have `firmware/include/config/config.hpp`
+  checked in; others (e.g. `develop`, `BIS22*`) generate it at build time from a hardware
+  description JSON. For those, CI runs the branch's own generator
+  (`node utils/scripts/generateHardwareConfig.js <target>`) with target **`fiona`** —
+  the same config the BIS class devices use (the `BIS` branch's checked-in `config.hpp`
+  hash matches `hardware/fiona.json` exactly). Override the target per run via the
+  workflow's `hardware_target` input. The UI shows which config each build used
+  (`hw: fiona` = generated, `hw: branch default` = checked in).
+- **Legacy branches:** very old branches (`master`, `jotaro-develop`, `ember-2020`, …) use
+  the ancient Arduino-IDE project layout without `firmware/platformio.ini` — they can't be
+  built by this pipeline (nor by the classic PyCharm flow) and are listed under "failed"
+  in the manifest. The project's actual mainline is the `BIS` / `develop` line.
 
 ## Browser support & limitations
 

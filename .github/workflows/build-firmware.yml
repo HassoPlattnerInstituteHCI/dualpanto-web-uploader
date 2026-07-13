@@ -1,0 +1,243 @@
+# Builds the dualpantoframework firmware for every branch of the firmware repo
+# and deploys the binaries together with the web flasher to GitHub Pages.
+#
+# Triggers:
+#   - manually via the "Run workflow" button (optionally with a branch filter)
+#   - nightly schedule (so new commits on the firmware repo get picked up)
+#   - every push to this repo's main branch (site changes)
+#   - repository_dispatch "firmware-updated" (lets the firmware repo ping this
+#     repo for instant rebuilds, see README)
+
+name: Build firmware & deploy site
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch_filter:
+        description: "Only build firmware branches matching this regex (empty = all branches)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "23 3 * * *" # nightly, 03:23 UTC
+  push:
+    branches: [main, master]
+  repository_dispatch:
+    types: [firmware-updated]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-and-deploy
+  cancel-in-progress: true
+
+env:
+  FIRMWARE_REPO: HassoPlattnerInstituteHCI/dualpantoframework
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. Discover all branches of the firmware repository
+  # ------------------------------------------------------------------
+  list-branches:
+    runs-on: ubuntu-latest
+    outputs:
+      branches: ${{ steps.list.outputs.branches }}
+    steps:
+      - name: List firmware branches
+        id: list
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILTER='${{ github.event.inputs.branch_filter }}'
+          git ls-remote --heads "https://github.com/${FIRMWARE_REPO}.git" \
+            | awk '{print $2}' \
+            | sed 's|^refs/heads/||' > all_branches.txt
+          if [ -n "$FILTER" ]; then
+            grep -E "$FILTER" all_branches.txt > branches.txt || true
+          else
+            cp all_branches.txt branches.txt
+          fi
+          echo "Building the following branches:"
+          cat branches.txt
+          BRANCHES=$(jq -R -s -c 'split("\n") | map(select(length > 0))' < branches.txt)
+          echo "branches=$BRANCHES" >> "$GITHUB_OUTPUT"
+
+  # ------------------------------------------------------------------
+  # 2. Compile the firmware for each branch (matrix)
+  # ------------------------------------------------------------------
+  build:
+    needs: list-branches
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        branch: ${{ fromJson(needs.list-branches.outputs.branches) }}
+    steps:
+      - name: Compute sanitized branch name
+        id: safe
+        shell: bash
+        run: |
+          SAFE=$(printf '%s' '${{ matrix.branch }}' | sed 's/[^A-Za-z0-9._-]/__/g')
+          echo "name=$SAFE" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout firmware branch
+        uses: actions/checkout@v4
+        with:
+          repository: HassoPlattnerInstituteHCI/dualpantoframework
+          ref: ${{ matrix.branch }}
+          path: fw
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # deliberately old-ish python: the pinned espressif32@2.1.0 platform
+          # ships tooling that is not compatible with very new python versions
+          python-version: "3.9"
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: platformio-${{ runner.os }}-${{ hashFiles('fw/firmware/platformio.ini') }}
+          restore-keys: |
+            platformio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install "platformio==6.1.19"
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd fw/firmware
+          # never try to talk to a serial port in CI
+          sed -i '/^\s*upload_port\s*=/d' platformio.ini
+          pio run -e esp32dev || pio run
+
+      - name: Collect flash images
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAFE='${{ steps.safe.outputs.name }}'
+          OUT="out/firmware/$SAFE"
+          mkdir -p "$OUT"
+
+          # locate the build directory (normally .pio/build/esp32dev)
+          BUILD_DIR=$(dirname "$(find fw/firmware/.pio/build -name firmware.bin | head -1)")
+          echo "Build dir: $BUILD_DIR"
+
+          cp "$BUILD_DIR/bootloader.bin"  "$OUT/bootloader.bin"
+          cp "$BUILD_DIR/partitions.bin"  "$OUT/partitions.bin"
+          cp "$BUILD_DIR/firmware.bin"    "$OUT/firmware.bin"
+
+          # boot_app0.bin ships with the arduino-espressif32 framework package
+          BOOT_APP0=$(find ~/.platformio/packages -name boot_app0.bin -path "*framework-arduinoespressif32*" | head -1)
+          FILES='[{"path":"bootloader.bin","offset":4096},{"path":"partitions.bin","offset":32768}'
+          if [ -n "$BOOT_APP0" ]; then
+            cp "$BOOT_APP0" "$OUT/boot_app0.bin"
+            FILES="$FILES"',{"path":"boot_app0.bin","offset":57344}'
+          fi
+          FILES="$FILES"',{"path":"firmware.bin","offset":65536}]'
+
+          COMMIT=$(git -C fw rev-parse HEAD)
+          jq -n \
+            --arg branch '${{ matrix.branch }}' \
+            --arg dir "firmware/$SAFE" \
+            --arg commit "$COMMIT" \
+            --arg builtAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson flashFiles "$FILES" \
+            '{branch:$branch, dir:$dir, commit:$commit, commitShort:($commit[0:7]), builtAt:$builtAt, chip:"ESP32", flashFiles:$flashFiles}' \
+            > "$OUT/info.json"
+          cat "$OUT/info.json"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ steps.safe.outputs.name }}
+          path: out
+          retention-days: 3
+
+  # ------------------------------------------------------------------
+  # 3. Assemble the site (flasher page + all firmware builds + manifest)
+  # ------------------------------------------------------------------
+  assemble:
+    needs: [list-branches, build]
+    if: ${{ always() && needs.list-branches.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout site sources
+        uses: actions/checkout@v4
+
+      - name: Copy static site
+        run: |
+          mkdir -p _site
+          cp -r site/. _site/
+
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          path: _site
+          merge-multiple: true
+
+      - name: Generate manifest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCHES='${{ needs.list-branches.outputs.branches }}'
+          python3 - "$BRANCHES" <<'EOF'
+          import glob, json, sys, datetime
+
+          requested = json.loads(sys.argv[1])
+          built = []
+          for info_path in sorted(glob.glob("_site/firmware/*/info.json")):
+              with open(info_path) as f:
+                  built.append(json.load(f))
+
+          built_names = {b["branch"] for b in built}
+          failed = [b for b in requested if b not in built_names]
+
+          # put the important branches first
+          priority = ["master", "develop", "BIS"]
+          built.sort(key=lambda b: (priority.index(b["branch"])
+                                    if b["branch"] in priority else len(priority),
+                                    b["branch"].lower()))
+
+          manifest = {
+              "firmwareRepo": "HassoPlattnerInstituteHCI/dualpantoframework",
+              "generatedAt": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "branches": built,
+              "failed": failed,
+          }
+          with open("_site/manifest.json", "w") as f:
+              json.dump(manifest, f, indent=1)
+
+          print(f"{len(built)} branches built, {len(failed)} failed: {failed}")
+          EOF
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  # ------------------------------------------------------------------
+  # 4. Deploy to GitHub Pages
+  # ------------------------------------------------------------------
+  deploy:
+    needs: assemble
+    if: ${{ always() && needs.assemble.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

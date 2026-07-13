@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DualPanto Web Firmware Uploader</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23DE6207'/%3E%3Cpath d='M5 3v6l6-3z' fill='%23fff'/%3E%3Crect x='4' y='11' width='8' height='2' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --hpi-orange: #DE6207;
+    --hpi-red: #B1063A;
+    --hpi-yellow: #F6A800;
+    --bg: #f4f4f5;
+    --card: #ffffff;
+    --text: #1f2328;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --ok: #15803d;
+    --err: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    background: linear-gradient(120deg, var(--hpi-red), var(--hpi-orange) 55%, var(--hpi-yellow));
+    color: #fff;
+    padding: 28px 24px 22px;
+  }
+  header h1 { margin: 0 0 4px; font-size: 1.5rem; }
+  header p { margin: 0; opacity: .92; font-size: .95rem; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 18px;
+  }
+  .card h2 {
+    margin: 0 0 12px;
+    font-size: 1.05rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .stepnum {
+    background: var(--hpi-orange);
+    color: #fff;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .85rem;
+    flex: none;
+  }
+  label { font-size: .9rem; color: var(--muted); display: block; margin-bottom: 4px; }
+  select, button {
+    font: inherit;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #fff;
+  }
+  select { min-width: 260px; max-width: 100%; }
+  button {
+    cursor: pointer;
+    background: var(--hpi-orange);
+    color: #fff;
+    border: none;
+    font-weight: 600;
+    transition: filter .15s;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); font-weight: 500; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .grow { flex: 1 1 auto; }
+  .meta { font-size: .85rem; color: var(--muted); margin-top: 8px; }
+  .meta a { color: var(--hpi-orange); }
+  .pill {
+    display: inline-block;
+    font-size: .78rem;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    margin-left: 6px;
+  }
+  .status { font-size: .9rem; margin-top: 10px; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .hint {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: .9rem;
+    margin-top: 12px;
+  }
+  .hint b { color: var(--hpi-orange); }
+  #progressWrap {
+    display: none;
+    margin-top: 14px;
+  }
+  #progressBar {
+    height: 10px;
+    background: var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  #progressFill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--hpi-orange), var(--hpi-yellow));
+    transition: width .2s;
+  }
+  #progressText { font-size: .85rem; color: var(--muted); margin-top: 4px; }
+  #terminal {
+    background: #16181d;
+    color: #d6d8dd;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .8rem;
+    border-radius: 8px;
+    padding: 12px 14px;
+    height: 260px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin-top: 12px;
+  }
+  #terminal .t-err { color: #f87171; }
+  #terminal .t-ok { color: #4ade80; }
+  #unsupported {
+    display: none;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: var(--err);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 18px;
+  }
+  details { margin-top: 10px; font-size: .9rem; }
+  details summary { cursor: pointer; color: var(--muted); }
+  .checkline { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: .9rem; color: var(--muted); }
+  footer { text-align: center; font-size: .8rem; color: var(--muted); padding: 20px; }
+  footer a { color: var(--hpi-orange); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>DualPanto Web Firmware Uploader</h1>
+  <p>Compile-free firmware upload for the DualPanto — pick a <b>dualpantoframework</b> branch, plug in the device, flash from the browser.</p>
+</header>
+
+<main>
+  <div id="unsupported">
+    <b>This browser does not support the Web Serial API.</b><br>
+    Please use Google Chrome, Microsoft Edge or another Chromium-based browser (Safari and Firefox do not work).
+  </div>
+
+  <!-- STEP 1: version -->
+  <div class="card">
+    <h2><span class="stepnum">1</span> Choose firmware version (branch)</h2>
+    <div class="row">
+      <div class="grow">
+        <label for="branchSelect">Branch of dualpantoframework</label>
+        <select id="branchSelect" disabled>
+          <option>Loading manifest…</option>
+        </select>
+      </div>
+    </div>
+    <div class="meta" id="branchMeta"></div>
+    <div class="meta" id="manifestMeta"></div>
+  </div>
+
+  <!-- STEP 2: connect -->
+  <div class="card">
+    <h2><span class="stepnum">2</span> Connect the DualPanto</h2>
+    <p style="margin:0 0 6px; font-size:.92rem;">
+      Plug the DualPanto into a USB port, then click connect and pick its serial port
+      (usually named <i>CP2102 USB to UART Bridge Controller</i> or <i>SLAB_USBtoUART</i>).
+    </p>
+    <div class="row">
+      <button id="connectBtn">Connect &amp; select port</button>
+      <button id="disconnectBtn" class="secondary" style="display:none;">Disconnect</button>
+      <div>
+        <label for="baudSelect">Flashing baud rate</label>
+        <select id="baudSelect" style="min-width:140px;">
+          <option value="460800" selected>460800 (default)</option>
+          <option value="921600">921600 (fast)</option>
+          <option value="230400">230400</option>
+          <option value="115200">115200 (safe)</option>
+        </select>
+      </div>
+    </div>
+    <div class="status" id="portStatus">No port selected.</div>
+    <div class="hint">
+      <b>Hold the flash button!</b> Press and hold the button on the back of the DualPanto
+      (top left, next to the USB port) <b>before clicking Upload</b> and keep holding it until
+      the log says <i>flashing…</i>. This puts the ESP32 into download mode — same as with the
+      PyCharm workflow.
+    </div>
+  </div>
+
+  <!-- STEP 3: flash -->
+  <div class="card">
+    <h2><span class="stepnum">3</span> Compile-free upload</h2>
+    <div class="row">
+      <button id="flashBtn" disabled>⚡ Upload firmware</button>
+      <button id="monitorBtn" class="secondary" disabled>Serial monitor (115200)</button>
+    </div>
+    <div class="checkline">
+      <input type="checkbox" id="eraseAll">
+      <label for="eraseAll" style="margin:0;">Erase entire flash first (slow — only when the device misbehaves)</label>
+    </div>
+    <div id="progressWrap">
+      <div id="progressBar"><div id="progressFill"></div></div>
+      <div id="progressText"></div>
+    </div>
+    <div class="status" id="flashStatus"></div>
+    <div id="terminal"></div>
+    <details>
+      <summary>Troubleshooting</summary>
+      <ul>
+        <li>If connecting fails or no port shows up, install the
+            <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers?tab=downloads" target="_blank" rel="noopener">CP210x driver</a>
+            and use a data-capable USB cable (not power-only).</li>
+        <li>If the log hangs at <i>Connecting…</i>, hold the flash button on the back of the device and try again.</li>
+        <li>Close PyCharm/VSCode serial monitors and any other tool using the port — the browser needs exclusive access.</li>
+        <li>If flashing fails at high speed, retry with baud rate 115200.</li>
+        <li>After a successful upload the device resets automatically. If handles behave strangely, press the reset button next to the power switch.</li>
+      </ul>
+    </details>
+  </div>
+</main>
+
+<footer>
+  Binaries are pre-compiled from
+  <a id="repoLink" href="https://github.com/HassoPlattnerInstituteHCI/dualpantoframework" target="_blank" rel="noopener">HassoPlattnerInstituteHCI/dualpantoframework</a>
+  by GitHub Actions · Flashing via <a href="https://github.com/espressif/esptool-js" target="_blank" rel="noopener">esptool-js</a> (Web Serial)
+</footer>
+
+<script type="module">
+import { ESPLoader, Transport } from "./vendor/esptool-js/bundle.js";
+
+/* ---------------------------------------------------------------- *
+ *  Tiny MD5 (for flash verification), operates on Uint8Array
+ * ---------------------------------------------------------------- */
+function md5(bytes) {
+  const s = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
+             5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,
+             4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
+             6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  const K = new Int32Array(64);
+  for (let i = 0; i < 64; i++) K[i] = (Math.abs(Math.sin(i + 1)) * 4294967296) | 0;
+
+  const n = bytes.length;
+  const paddedLen = (((n + 8) >> 6) + 1) << 6;
+  const buf = new Uint8Array(paddedLen);
+  buf.set(bytes);
+  buf[n] = 0x80;
+  const bitLen = n * 8;
+  // little-endian 64-bit length (JS numbers are fine up to 2^53 bits)
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(paddedLen - 8, bitLen >>> 0, true);
+  dv.setUint32(paddedLen - 4, Math.floor(bitLen / 4294967296), true);
+
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  const M = new Int32Array(16);
+
+  for (let off = 0; off < paddedLen; off += 64) {
+    for (let i = 0; i < 16; i++) M[i] = dv.getUint32(off + i * 4, true);
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16)      { F = (B & C) | (~B & D);        g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C);        g = (5 * i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D;                 g = (3 * i + 5) % 16; }
+      else             { F = C ^ (B | ~D);              g = (7 * i) % 16; }
+      F = (F + A + K[i] + M[g]) | 0;
+      A = D; D = C; C = B;
+      B = (B + ((F << s[i]) | (F >>> (32 - s[i])))) | 0;
+    }
+    a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+  }
+  const out = new Uint8Array(16);
+  new DataView(out.buffer).setUint32(0, a0, true);
+  new DataView(out.buffer).setUint32(4, b0, true);
+  new DataView(out.buffer).setUint32(8, c0, true);
+  new DataView(out.buffer).setUint32(12, d0, true);
+  return Array.from(out).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+window.__md5 = md5; // exposed for automated tests
+
+/* ---------------------------------------------------------------- *
+ *  UI helpers
+ * ---------------------------------------------------------------- */
+const $ = (id) => document.getElementById(id);
+const termEl = $("terminal");
+
+function termWrite(text, cls) {
+  const span = document.createElement("span");
+  if (cls) span.className = cls;
+  span.textContent = text;
+  termEl.appendChild(span);
+  termEl.scrollTop = termEl.scrollHeight;
+}
+const espTerminal = {
+  clean() { termEl.textContent = ""; },
+  writeLine(data) { termWrite(data + "\n"); },
+  write(data) { termWrite(data); },
+};
+
+function setStatus(el, text, cls) {
+  el.textContent = text;
+  el.className = "status" + (cls ? " " + cls : "");
+}
+
+/* ---------------------------------------------------------------- *
+ *  Manifest / branch selection
+ * ---------------------------------------------------------------- */
+let manifest = null;
+
+async function loadManifest() {
+  const sel = $("branchSelect");
+  try {
+    const res = await fetch("manifest.json?ts=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    manifest = await res.json();
+  } catch (e) {
+    sel.innerHTML = "<option>manifest.json not found</option>";
+    $("manifestMeta").innerHTML =
+      "Could not load <code>manifest.json</code> (" + e.message + "). " +
+      "Run the <b>Build firmware &amp; deploy site</b> GitHub Action once so the firmware binaries get built.";
+    return;
+  }
+
+  sel.innerHTML = "";
+  for (const b of manifest.branches) {
+    const opt = document.createElement("option");
+    opt.value = b.branch;
+    opt.textContent = b.branch;
+    sel.appendChild(opt);
+  }
+  sel.disabled = manifest.branches.length === 0;
+  if (manifest.branches.length === 0) {
+    sel.innerHTML = "<option>No successfully built branches</option>";
+  }
+
+  const failed = manifest.failed?.length
+    ? ` · <span title="${manifest.failed.join(", ")}">${manifest.failed.length} branch(es) failed to compile</span>` : "";
+  $("manifestMeta").innerHTML =
+    `Manifest generated ${new Date(manifest.generatedAt).toLocaleString()} · ` +
+    `${manifest.branches.length} branches available${failed}`;
+  if (manifest.firmwareRepo) {
+    $("repoLink").href = "https://github.com/" + manifest.firmwareRepo;
+    $("repoLink").textContent = manifest.firmwareRepo;
+  }
+  sel.addEventListener("change", updateBranchMeta);
+  updateBranchMeta();
+}
+
+function selectedBranch() {
+  return manifest?.branches.find(b => b.branch === $("branchSelect").value) ?? null;
+}
+
+function updateBranchMeta() {
+  const b = selectedBranch();
+  if (!b) { $("branchMeta").textContent = ""; return; }
+  const repo = manifest.firmwareRepo || "HassoPlattnerInstituteHCI/dualpantoframework";
+  $("branchMeta").innerHTML =
+    `Commit <a href="https://github.com/${repo}/commit/${b.commit}" target="_blank" rel="noopener">${b.commitShort}</a>` +
+    `<span class="pill">built ${new Date(b.builtAt).toLocaleString()}</span>` +
+    `<span class="pill">${b.chip}</span>`;
+}
+
+/* ---------------------------------------------------------------- *
+ *  Serial port handling
+ * ---------------------------------------------------------------- */
+let port = null;          // SerialPort chosen by the user
+let transport = null;     // esptool-js transport (only during flashing)
+let monitorActive = false;
+let monitorReader = null;
+let busy = false;
+
+function refreshButtons() {
+  $("connectBtn").style.display = port ? "none" : "";
+  $("disconnectBtn").style.display = port ? "" : "none";
+  $("flashBtn").disabled = !port || busy || !selectedBranch();
+  $("monitorBtn").disabled = !port || busy;
+  $("monitorBtn").textContent = monitorActive ? "Stop serial monitor" : "Serial monitor (115200)";
+}
+
+$("connectBtn").addEventListener("click", async () => {
+  try {
+    port = await navigator.serial.requestPort();
+    const info = port.getInfo();
+    const usb = info.usbVendorId
+      ? ` (USB ${info.usbVendorId.toString(16).padStart(4, "0")}:${(info.usbProductId ?? 0).toString(16).padStart(4, "0")})`
+      : "";
+    setStatus($("portStatus"), "Port selected" + usb + " — ready to upload.", "ok");
+  } catch {
+    /* user cancelled the picker */
+  }
+  refreshButtons();
+});
+
+$("disconnectBtn").addEventListener("click", async () => {
+  await stopMonitor();
+  try { await transport?.disconnect(); } catch {}
+  try { await port?.close(); } catch {}
+  transport = null;
+  port = null;
+  setStatus($("portStatus"), "No port selected.");
+  refreshButtons();
+});
+
+/* ---------------------------------------------------------------- *
+ *  Flashing
+ * ---------------------------------------------------------------- */
+async function fetchBinary(path) {
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to fetch ${path} (HTTP ${res.status})`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+$("flashBtn").addEventListener("click", async () => {
+  const branch = selectedBranch();
+  if (!branch || !port || busy) return;
+  busy = true;
+  refreshButtons();
+  await stopMonitor();
+
+  const progressWrap = $("progressWrap");
+  const fill = $("progressFill");
+  const ptext = $("progressText");
+  espTerminal.clean();
+  setStatus($("flashStatus"), "");
+  progressWrap.style.display = "block";
+  fill.style.width = "0%";
+
+  try {
+    // 1. download binaries
+    termWrite(`Downloading firmware for branch "${branch.branch}" (${branch.commitShort})…\n`);
+    const files = [];
+    for (const f of branch.flashFiles) {
+      const data = await fetchBinary(`${branch.dir}/${f.path}`);
+      files.push({ data, address: f.offset });
+      termWrite(`  ${f.path}  →  0x${f.offset.toString(16)}  (${data.length} bytes)\n`);
+    }
+    const totalBytes = files.reduce((s, f) => s + f.data.length, 0);
+
+    // 2. connect to the ESP32
+    termWrite("\nConnecting to the device — hold the flash button on the back!\n", "t-ok");
+    transport = new Transport(port, false);
+    const loader = new ESPLoader({
+      transport,
+      baudrate: parseInt($("baudSelect").value, 10),
+      terminal: espTerminal,
+    });
+    const chip = await loader.main();
+    termWrite(`\nDetected: ${chip}\n`, "t-ok");
+
+    // 3. flash — you can release the button now
+    termWrite("Flashing… (you can release the button now)\n", "t-ok");
+    const written = new Array(files.length).fill(0);
+    await loader.writeFlash({
+      fileArray: files,
+      flashSize: "keep",
+      flashMode: "keep",
+      flashFreq: "keep",
+      eraseAll: $("eraseAll").checked,
+      compress: true,
+      reportProgress(fileIndex, w, total) {
+        written[fileIndex] = w;
+        const done = written.reduce((s, x) => s + x, 0);
+        const pct = Math.min(100, Math.round((done / totalBytes) * 100));
+        fill.style.width = pct + "%";
+        ptext.textContent = `Writing ${branch.flashFiles[fileIndex].path} — ${pct}% overall`;
+      },
+      calculateMD5Hash: (image) => md5(image),
+    });
+
+    // 4. reset into the new firmware
+    await loader.after("hard_reset");
+    fill.style.width = "100%";
+    ptext.textContent = "Done";
+    termWrite("\nOK — firmware uploaded, device resetting.\n", "t-ok");
+    setStatus($("flashStatus"),
+      `✓ ${branch.branch} (${branch.commitShort}) uploaded successfully. The DualPanto is restarting.`, "ok");
+  } catch (e) {
+    console.error(e);
+    termWrite("\nERROR: " + (e?.message ?? e) + "\n", "t-err");
+    setStatus($("flashStatus"),
+      "✗ Upload failed — see log. Hold the flash button while connecting, check the cable/driver, or lower the baud rate.", "err");
+  } finally {
+    try { await transport?.disconnect(); } catch {}
+    transport = null;
+    busy = false;
+    refreshButtons();
+  }
+});
+
+/* ---------------------------------------------------------------- *
+ *  Serial monitor
+ * ---------------------------------------------------------------- */
+async function stopMonitor() {
+  if (!monitorActive) return;
+  monitorActive = false;
+  try { await monitorReader?.cancel(); } catch {}
+}
+
+$("monitorBtn").addEventListener("click", async () => {
+  if (monitorActive) { await stopMonitor(); return; }
+  if (!port || busy) return;
+  espTerminal.clean();
+  termWrite("— serial monitor @115200, click again to stop —\n", "t-ok");
+  monitorActive = true;
+  refreshButtons();
+  const decoder = new TextDecoder();
+  try {
+    await port.open({ baudRate: 115200 });
+  } catch (e) {
+    if (!String(e).includes("already open")) {
+      termWrite("Could not open port: " + e.message + "\n", "t-err");
+      monitorActive = false;
+      refreshButtons();
+      return;
+    }
+  }
+  try {
+    while (monitorActive && port.readable) {
+      monitorReader = port.readable.getReader();
+      try {
+        while (monitorActive) {
+          const { value, done } = await monitorReader.read();
+          if (done) break;
+          if (value) termWrite(decoder.decode(value));
+        }
+      } finally {
+        monitorReader.releaseLock();
+      }
+    }
+  } catch (e) {
+    termWrite("\nMonitor stopped: " + e.message + "\n", "t-err");
+  }
+  try { await port.close(); } catch {}
+  monitorActive = false;
+  refreshButtons();
+  termWrite("\n— monitor closed —\n", "t-ok");
+});
+
+/* ---------------------------------------------------------------- *
+ *  Init
+ * ---------------------------------------------------------------- */
+if (!("serial" in navigator)) {
+  $("unsupported").style.display = "block";
+  $("connectBtn").disabled = true;
+}
+loadManifest().then(refreshButtons);
+refreshButtons();
+</script>
+</body>
+</html>

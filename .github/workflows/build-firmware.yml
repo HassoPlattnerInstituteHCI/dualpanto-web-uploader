@@ -165,12 +165,31 @@ jobs:
           BUILD_DIR=$(dirname "$(find fw/firmware/.pio/build -name firmware.bin | head -1)")
           echo "Build dir: $BUILD_DIR"
 
-          cp "$BUILD_DIR/bootloader.bin"  "$OUT/bootloader.bin"
+          # Bootloader: newer espressif32 platforms copy bootloader.bin into the
+          # build dir; old ones (e.g. the pinned espressif32@2.1.0 / arduino 1.0.4)
+          # flash it directly from the framework package instead:
+          #   <framework>/tools/sdk/bin/bootloader_${flash_mode}_${f_flash}.bin
+          # (esp32dev = dio @ 40m; see FLASH_EXTRA_IMAGES in tools/platformio-build.py)
+          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            BOOTLOADER="$BUILD_DIR/bootloader.bin"
+          else
+            BOOTLOADER=$(find ~/.platformio/packages -path "*framework-arduinoespressif32*" -name "bootloader_dio_40m.bin" | sort | head -1)
+            if [ -z "$BOOTLOADER" ]; then
+              BOOTLOADER=$(find ~/.platformio/packages -path "*framework-arduinoespressif32*" -path "*sdk*" -name "bootloader_*.bin" | sort | head -1)
+            fi
+          fi
+          if [ -z "$BOOTLOADER" ]; then
+            echo "::error::Could not locate a bootloader binary"
+            exit 1
+          fi
+          echo "Bootloader: $BOOTLOADER"
+
+          cp "$BOOTLOADER"                "$OUT/bootloader.bin"
           cp "$BUILD_DIR/partitions.bin"  "$OUT/partitions.bin"
           cp "$BUILD_DIR/firmware.bin"    "$OUT/firmware.bin"
 
           # boot_app0.bin ships with the arduino-espressif32 framework package
-          BOOT_APP0=$(find ~/.platformio/packages -name boot_app0.bin -path "*framework-arduinoespressif32*" | head -1)
+          BOOT_APP0=$(find ~/.platformio/packages -name boot_app0.bin -path "*framework-arduinoespressif32*" | sort | head -1)
           FILES='[{"path":"bootloader.bin","offset":4096},{"path":"partitions.bin","offset":32768}'
           if [ -n "$BOOT_APP0" ]; then
             cp "$BOOT_APP0" "$OUT/boot_app0.bin"

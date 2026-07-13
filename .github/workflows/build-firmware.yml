@@ -56,9 +56,10 @@ jobs:
       - name: List firmware branches
         id: list
         shell: bash
+        env:
+          FILTER: ${{ github.event.inputs.branch_filter }}
         run: |
           set -euo pipefail
-          FILTER='${{ github.event.inputs.branch_filter }}'
           git ls-remote --heads "https://github.com/${FIRMWARE_REPO}.git" \
             | awk '{print $2}' \
             | sed 's|^refs/heads/||' > all_branches.txt
@@ -88,8 +89,10 @@ jobs:
       - name: Compute sanitized branch name
         id: safe
         shell: bash
+        env:
+          BRANCH: ${{ matrix.branch }}
         run: |
-          SAFE=$(printf '%s' '${{ matrix.branch }}' | sed 's/[^A-Za-z0-9._-]/__/g')
+          SAFE=$(printf '%s' "$BRANCH" | sed 's/[^A-Za-z0-9._-]/__/g')
           echo "name=$SAFE" >> "$GITHUB_OUTPUT"
 
       - name: Checkout firmware branch
@@ -155,9 +158,12 @@ jobs:
 
       - name: Collect flash images
         shell: bash
+        env:
+          BRANCH: ${{ matrix.branch }}
+          SAFE: ${{ steps.safe.outputs.name }}
+          CONFIG_SOURCE: ${{ steps.hwconfig.outputs.source }}
         run: |
           set -euo pipefail
-          SAFE='${{ steps.safe.outputs.name }}'
           OUT="out/firmware/$SAFE"
           mkdir -p "$OUT"
 
@@ -199,11 +205,11 @@ jobs:
 
           COMMIT=$(git -C fw rev-parse HEAD)
           jq -n \
-            --arg branch '${{ matrix.branch }}' \
+            --arg branch "$BRANCH" \
             --arg dir "firmware/$SAFE" \
             --arg commit "$COMMIT" \
             --arg builtAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg config '${{ steps.hwconfig.outputs.source }}' \
+            --arg config "$CONFIG_SOURCE" \
             --argjson flashFiles "$FILES" \
             '{branch:$branch, dir:$dir, commit:$commit, commitShort:($commit[0:7]), builtAt:$builtAt, chip:"ESP32", config:$config, flashFiles:$flashFiles}' \
             > "$OUT/info.json"
@@ -241,13 +247,16 @@ jobs:
 
       - name: Generate manifest.json
         shell: bash
+        env:
+          # passed via env (NOT inlined into the script) because branch names
+          # may contain shell metacharacters, e.g. "dale'stesting"
+          BRANCHES: ${{ needs.list-branches.outputs.branches }}
         run: |
           set -euo pipefail
-          BRANCHES='${{ needs.list-branches.outputs.branches }}'
-          python3 - "$BRANCHES" <<'EOF'
-          import glob, json, sys, datetime
+          python3 - <<'EOF'
+          import glob, json, os, datetime
 
-          requested = json.loads(sys.argv[1])
+          requested = json.loads(os.environ["BRANCHES"])
           built = []
           for info_path in sorted(glob.glob("_site/firmware/*/info.json")):
               with open(info_path) as f:

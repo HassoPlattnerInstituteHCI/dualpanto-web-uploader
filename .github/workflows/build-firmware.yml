@@ -17,6 +17,10 @@ on:
         description: "Only build firmware branches matching this regex (empty = all branches)"
         required: false
         default: ""
+      hardware_target:
+        description: "Hardware config used when a branch has no checked-in config.hpp (hardware/<target>.json)"
+        required: false
+        default: "fiona"
   schedule:
     - cron: "23 3 * * *" # nightly, 03:23 UTC
   push:
@@ -35,6 +39,10 @@ concurrency:
 
 env:
   FIRMWARE_REPO: HassoPlattnerInstituteHCI/dualpantoframework
+  # hardware config for branches that generate config.hpp at build time.
+  # "fiona" is what the BIS class devices use (verified: the BIS branch's
+  # checked-in config.hpp hash matches hardware/fiona.json).
+  HARDWARE_TARGET: ${{ github.event.inputs.hardware_target || 'fiona' }}
 
 jobs:
   # ------------------------------------------------------------------
@@ -112,6 +120,30 @@ jobs:
       - name: Install PlatformIO
         run: pip install "platformio==6.1.19"
 
+      - name: Generate hardware config (if not checked in)
+        id: hwconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd fw
+          if [ ! -f firmware/platformio.ini ]; then
+            echo "::error::This branch has no firmware/platformio.ini (pre-PlatformIO legacy layout) — cannot build."
+            exit 1
+          fi
+          if [ -f firmware/include/config/config.hpp ]; then
+            echo "config.hpp is checked in on this branch — using it as-is."
+            echo "source=checked-in" >> "$GITHUB_OUTPUT"
+          elif [ -f utils/scripts/generateHardwareConfig.js ] && [ -f "hardware/${HARDWARE_TARGET}.json" ]; then
+            echo "Generating config.hpp from hardware/${HARDWARE_TARGET}.json"
+            node utils/scripts/generateHardwareConfig.js "$HARDWARE_TARGET"
+            test -f firmware/include/config/config.hpp
+            test -f firmware/src/config/config.cpp
+            echo "source=generated:${HARDWARE_TARGET}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No checked-in config.hpp and no usable generator/hardware/${HARDWARE_TARGET}.json on this branch."
+            exit 1
+          fi
+
       - name: Build firmware
         shell: bash
         run: |
@@ -152,8 +184,9 @@ jobs:
             --arg dir "firmware/$SAFE" \
             --arg commit "$COMMIT" \
             --arg builtAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg config '${{ steps.hwconfig.outputs.source }}' \
             --argjson flashFiles "$FILES" \
-            '{branch:$branch, dir:$dir, commit:$commit, commitShort:($commit[0:7]), builtAt:$builtAt, chip:"ESP32", flashFiles:$flashFiles}' \
+            '{branch:$branch, dir:$dir, commit:$commit, commitShort:($commit[0:7]), builtAt:$builtAt, chip:"ESP32", config:$config, flashFiles:$flashFiles}' \
             > "$OUT/info.json"
           cat "$OUT/info.json"
 

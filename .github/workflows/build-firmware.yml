@@ -78,7 +78,10 @@ jobs:
   # ------------------------------------------------------------------
   build:
     needs: list-branches
-    runs-on: ubuntu-latest
+    # pinned: ubuntu-latest is now 26.04, for which actions/setup-python has
+    # no Python 3.9 builds (3.9 is EOL). Bump python-version below before
+    # moving this off 24.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
